@@ -56,7 +56,7 @@ const tokenRules = {
         ]
     },
     PATTERN_DEF: {
-        pattern: /^[\t ]*p\s+(?:(\w+)\s+)?(.+?)\s+pe[\t ]*/m,
+        pattern: /^[\t ]*p\s+(?:(\w+))?\s+([\S\s]+?)\s+pe[\t ]*/m,
         groupTokens: [
             'PATTERN_NAME',
             'CELL_PATTERNS'
