@@ -1,10 +1,14 @@
+// helpers
 class LeveledConsole {
     #levelNames = {};
     shouldLog(messageLevel) {
         if (this.loggingLevel < 0)
             return messageLevel === this.loggingLevel;
-        else 
-            return this.loggingLevel >= messageLevel;
+
+        else if (this.loggingLevel === 0)
+            return false;
+
+        else return this.loggingLevel >= messageLevel;
     }
 
     constructor (loggingLevel) {
@@ -35,31 +39,65 @@ class LeveledConsole {
         return this.#levelNames[loggingLevel] = name;
     }
 }
+function getBrailleCellPattern(cellbinary) {
+    if (typeof cellbinary !== 'number')
+        throw new TypeError('Braille cell binary must be a number.');
+    if (cellbinary > 255)
+        throw new RangeError('Braille cell binary must be lower than 255.');
+    if (cellbinary < 0)
+        throw new RangeError('Braille cell binary must be greater than 0.');
 
+    return String.fromCharCode(0x2800 + cellbinary);
+}
+function brailleCellStringToPattern(string, emptyDotChars = [' ', '0'], fullDotChars = ['.', '1']) {
+    const validChars = [...emptyDotChars, ...fullDotChars];
+    const mappingString = '03142567';
+    let brailleDots = 0;
+
+    const dotArray = 
+        [...string]
+        .filter(char => validChars.includes(char))
+        .map(char => fullDotChars.includes(char));
+
+    if (dotArray.length !== 6 && dotArray.length !== 8)
+        throw new SyntaxError('Braille cell string must have 6 or 8 dots.');
+
+    for (const [index, isFilled] of dotArray.entries()) {
+        if (isFilled) brailleDots += 2**parseInt(mappingString[index]);
+    }
+    return getBrailleCellPattern(brailleDots);
+}
+
+// tokens
 const tokenRules = {
     FULL_CHAR_DEF: {
         pattern: /^[\t ]*fc[\t ]+([\S\t ]+)[\t ]*/,
         groupTokens: [
             'FULL_CHARS'
-        ]
+        ],
+        required: true
     },
     EMPTY_CHAR_DEF: {
         pattern: /^[\t ]*ec[\t ]+([\S\t ]+)[\t ]*/,
         groupTokens: [
             'EMPTY_CHARS'
-        ]
+        ],
+        required: true
     },
     OUTPUT_TYPE_DEF: {
-        pattern: /^[\t ]*of[\t ]+(array|chain_string)/,
+        pattern: /^[\t ]*of[\t ]+(array|chain_strings|object)/,
         groupTokens: [
             'OUTPUT_TYPE'
-        ]
+        ],
+        required: true
     },
     PATTERN_DEF: {
-        pattern: /^[\t ]*p\s+(?:(\w+))?\s+([\S\s]+?)\s+pe[\t ]*/m,
+        pattern: /^[\t ]*(p)\s+(\w+)\s+([\S\s]+?)\s+(pe)[\t ]*/m,
         groupTokens: [
+            'PATTERN_START',
             'PATTERN_NAME',
-            'CELL_PATTERNS'
+            'CELL_PATTERNS',
+            'PATTERN_END'
         ]
     },
     COMMENT: {
@@ -71,6 +109,56 @@ const tokenRules = {
         ignore: true
     }
 }
+const tokenHandlers = {
+    FULL_CHARS: {
+        handler: (output, {value}={}) => {
+            output.fullChars = [...value];
+            return output;
+        }
+    },
+    EMPTY_CHARS: {
+        handler: (output, {value}={}) => {
+            output.emptyChars = [...value];
+            return output;
+        }
+    },
+    OUTPUT_TYPE: {
+        handler: (output, {value}={}) => {
+            output.type = value;
+            return output;
+        },
+        fallback: 'chain_strings'
+    },
+    PATTERN_START: {
+        handler: (output, {nextTokens, tokens}={}) => {
+            if (nextTokens[2].name !== 'PATTERN_END')
+                throw new SyntaxError('Pattern start is missing a matching pattern end');
+
+            const name = nextTokens[0].value;
+            const cellPatterns = nextTokens[1].value.split('\n').map(v => v.slice('c '.length));
+            switch (output.type) {
+                case 'object':
+                    output.patterns ??= {};
+                    output.patterns[name] = cellPatterns;
+                    break;
+
+                case 'array':
+                    output.patterns ??= [];
+                    if (!output.patterns.find(pattern => pattern[0] === cellPatterns))
+                        output.patterns.push([name, cellPatterns]);
+                    break;
+
+                case 'chain_strings':
+                    output.patterns = {};
+                    output.patterns[name] = cellPatterns.map(cell => brailleCellStringToPattern(cell, output.emptyChars, output.fullChars));
+                    break;
+            }
+            return output;
+        }
+    }
+}
+
+// tokenizer
 function tokenizeFile(fileContent, loggingLevel = 0) {
     // init leveled console
     const Lconsole = new LeveledConsole(loggingLevel);
@@ -121,44 +209,95 @@ function tokenizeFile(fileContent, loggingLevel = 0) {
             Lconsole.log(-1, 'Token rule definition:', ruleDef);
             const groups = [...match].slice(1);
             for (const [group, value] of groups.entries()) {
+                // 
                 const token = {
                     name: ruleDef.groupTokens[group],
                     value,
-                    index: originalFileContent.length - fileContent.length
+                    index: originalFileContent.length - fileContent.length,
+                    line: 0,
+                    col: 0
                 }
+                // get token location in file
+                const lines = originalFileContent.split('\n');
+                const index = originalFileContent.length - fileContent.length;
+                let lengthSum = 0;
+                let previousLengthSum = 0;
+                for (const [lineindex, content] of lines.entries()) {
+                    token.line = lineindex;
+                    lengthSum += content.length;
+                    if (lengthSum >= index) break;
+                    previousLengthSum = lengthSum;
+                }
+                token.line++;
+                token.col = (index - (lengthSum - (lengthSum - previousLengthSum))) + 2;
+
                 tokens.push(token);
                 Lconsole.log(-1, 'Parsed token:', token);
             }
             fileContent = fileContent.slice(match[0].length).trim();
             Lconsole.log(-1, 'Remaining file content:', fileContent);
-
-            const lines = ['abcdef', 'ghijklmnop', 'q', 'rstuvw', 'xyz'];
-const index = 7;
-let line = 0;
-let lineSum = 0;
-let prevLineSum = 0;
-for (const [lineindex, content] of lines.entries()) {
-    line = lineindex;
-    lineSum += content.length;
-    if (lineSum >= index) break;
-    prevLineSum = lineSum;
-}
-const charAtLine = (index - (lineSum - (lineSum - prevLineSum))) + 1;
-console.log('target index:', index);
-console.log('line sum:', lineSum);
-console.log('prev line sum:', prevLineSum);
-console.log('found line index:', line);
-console.log('found index at line:', charAtLine);
-console.log('found line:', lines[line]);
-console.log('lines:', lines.join('\n'));
-console.log('target char:', lines.join('\n')[index]);
-console.log('found char: ', lines[line][charAtLine]);
-console.log('is guess correct?', ['no','yes'][Number(index === charAtLine)]);
         });
         if (!found) {
             const errorIndex = originalFileContent.length - fileContent.length;
-            throw new SyntaxError(`Unexpected token "${fileContent[0]}" at index ${errorIndex}`);
+            const quote = fileContent[0] === "'" ? '"' : "'";
+            throw new SyntaxError(`Invalid token ${quote + fileContent[0] + quote} at index ${errorIndex}`);
+        }
+    }
+    const requiredTokens = Object.entries(tokenRules).filter(token => token.required);
+    for (const [requiredToken] of requiredTokens) {    
+        if (!tokens.includes(requiredToken)) {
+            if (tokenHandlers[requiredToken].fallback) {
+                tokens.unshift({
+                    name: requiredToken,
+                    value: tokenHandlers[requiredToken].fallback,
+                    index: -1,
+                    line: 0,
+                    col: 0
+                });
+            } else throw new SyntaxError(`File is missing the required token ${requiredToken}`);
         }
     }
     return tokens;
+}
+// parser
+function parseTokens(tokens, loggingLevel = 0) {
+    // init leveled console
+    const Lconsole = new LeveledConsole(loggingLevel);
+    Lconsole.setLevelName(-1, 'debugging');
+    Lconsole.setLevelName(0, 'none');
+    Lconsole.setLevelName(1, 'vague');
+    Lconsole.setLevelName(2, 'informant');
+    Lconsole.setLevelName(3, 'verbose');
+
+    // parse
+    const output = {};
+    Lconsole.log(1, 'Parsing tokens...');
+    for (const [index, token] of tokens.entries()) {
+        Lconsole.log(3, 'Parsing token', token.name);
+        const handler = tokenHandlers[token.name];
+        if (!handler) {
+            Lconsole.log(3, `Token ${token.name} does not have a handler. Skipping token...`);
+            continue;
+        }
+        const nextTokens = tokens.filter((_, i) => i > index),
+              prevTokens = tokens.filter((_, i) => i < index);
+
+        Lconsole.log(-1, 'Previous tokens:', prevTokens);
+        Lconsole.log(-1, 'Next tokens:', nextTokens);
+
+        handler.handler(output, {
+            value: token.value,
+            nextTokens,
+            prevTokens,
+            tokens
+        });
+        Lconsole.log(2, 'Parsed token', token.name);
+    }
+    return output;
+}
+// compiler(?)
+function compileFile(file, loggingLevel = 0) {
+    const tokens = tokenizeFile(file, loggingLevel);
+    const output = parseTokens(tokens, loggingLevel);
+    return output;
 }
