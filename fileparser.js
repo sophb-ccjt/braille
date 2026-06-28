@@ -131,6 +131,29 @@ function tokenizeFile(fileContent, loggingLevel = 0) {
             }
             fileContent = fileContent.slice(match[0].length).trim();
             Lconsole.log(-1, 'Remaining file content:', fileContent);
+
+            const lines = ['abcdef', 'ghijklmnop', 'q', 'rstuvw', 'xyz'];
+const index = 7;
+let line = 0;
+let lineSum = 0;
+let prevLineSum = 0;
+for (const [lineindex, content] of lines.entries()) {
+    line = lineindex;
+    lineSum += content.length;
+    if (lineSum >= index) break;
+    prevLineSum = lineSum;
+}
+const charAtLine = (index - (lineSum - (lineSum - prevLineSum))) + 1;
+console.log('target index:', index);
+console.log('line sum:', lineSum);
+console.log('prev line sum:', prevLineSum);
+console.log('found line index:', line);
+console.log('found index at line:', charAtLine);
+console.log('found line:', lines[line]);
+console.log('lines:', lines.join('\n'));
+console.log('target char:', lines.join('\n')[index]);
+console.log('found char: ', lines[line][charAtLine]);
+console.log('is guess correct?', ['no','yes'][Number(index === charAtLine)]);
         });
         if (!found) {
             const errorIndex = originalFileContent.length - fileContent.length;
