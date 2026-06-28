@@ -1,4 +1,4 @@
-const spinnerBrailleFile = `fc abcdefgh1
+const brailleSpinnerFile = `fc abcdefgh1
 ec 0
 of chain_strings
 
@@ -176,7 +176,7 @@ pe
 `;
 
 function getBrailleSpinnerFrames(size = 3, highres = false) {
-    const compiledBraille = compileFile(spinnerBrailleFile);
+    const compiledBraille = compileFile(brailleSpinnerFile);
     const frames = compiledBraille.patterns[['l', 'h'][highres+0] + size];
     return frames;
 }
